@@ -1,0 +1,14 @@
+# IntelliJ config files
+.idea/
+*.iml
+
+# python compile files
+__pycache__/
+*.py[cod]
+
+# Mac system files
+.DS_Store
+
+# virtual environment files
+venv/
+env/
