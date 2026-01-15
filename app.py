@@ -1,56 +1,72 @@
 import streamlit as st
-import easyocr
-import numpy as np
-from PIL import Image
+from google.cloud import vision
+from google.oauth2 import service_account
+import io
 import re
+import json
 
 st.title("# CRC (COOL RUNNING CREW) RUNNING LOG")
 st.write("- upload running log image files")
 
-# 이미지 업로드 위젯
+# Streamlit Secrets에서 GCP 키 로드 함수
+def get_vision_client():
+    try:
+        # secrets.toml 파일에 gcp_service_account 섹션이 있어야 함
+        key_dict = st.secrets["gcp_service_account"]
+        creds = service_account.Credentials.from_service_account_info(key_dict)
+        client = vision.ImageAnnotatorClient(credentials=creds)
+        return client
+    except Exception as e:
+        st.error(f"GCP Credentials Error: {e}")
+        return None
+
 uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"])
 
 if uploaded_file is not None:
-    # 이미지 열기 및 화면 표시
-    image = Image.open(uploaded_file)
-    st.image(image, caption='Uploaded Image.', use_container_width=True)
+    # 이미지 표시
+    st.image(uploaded_file, caption='Uploaded Image.', use_container_width=True)
     
     st.write("")
-    st.write("Extracting text...")
+    st.write("Extracting text with Google Cloud Vision API...")
 
-    # EasyOCR 리더 초기화 (한국어, 영어 지원)
-    reader = easyocr.Reader(['ko', 'en'], gpu=False) 
+    client = get_vision_client()
     
-    # 이미지를 numpy 배열로 변환
-    image_np = np.array(image)
-    
-    # 텍스트 추출
-    result = reader.readtext(image_np)
-    
-    # 결과 출력
-    st.subheader("Extracted Distance (km):")
-    
-    # 패턴: 숫자(정수/소수) 뒤에 선택적으로 공백이 있고 'km' 또는 'k'가 오는 경우 (대소문자 무시)
-    # 그룹 1: 숫자 부분 (\d+(\.\d+)?)
-    # 그룹 3: 단위 부분 (km|k)
-    km_pattern = re.compile(r'(\d+(\.\d+)?)\s*(km|k)', re.IGNORECASE)
-    
-    found_numbers = []
-    print("\n--- Extraction Started ---")
-    
-    for (bbox, text, prob) in result:
-        clean_text = text.strip()
-        print(f"[DEBUG] Raw text: '{clean_text}' (Prob: {prob:.2f})")
-        
-        # 패턴 매칭
-        for match in km_pattern.finditer(clean_text):
-            num_str = match.group(1) # 첫 번째 그룹(숫자)만 추출
-            found_numbers.append(num_str)
-            st.write(f"Distance: {num_str} km (from '{clean_text}')")
-            print(f"[LOG] Found distance: {num_str} km (from '{clean_text}')")
-            
-    if not found_numbers:
-        st.write("No distance found.")
-        print("[LOG] No distance found.")
-    
-    print("--- Extraction Finished ---\n")
+    if client:
+        # 이미지를 바이트로 읽기
+        content = uploaded_file.getvalue()
+        image = vision.Image(content=content)
+
+        # 텍스트 감지 요청
+        response = client.text_detection(image=image)
+        texts = response.text_annotations
+
+        if response.error.message:
+            st.error(f"API Error: {response.error.message}")
+        else:
+            # 첫 번째 요소는 전체 텍스트입니다.
+            if texts:
+                full_text = texts[0].description
+                st.text_area("Raw Extracted Text", full_text, height=150)
+                
+                # km 패턴 찾기
+                km_pattern = re.compile(r'(\d+(\.\d+)?)\s*(km|k)', re.IGNORECASE)
+                found_numbers = []
+                
+                print("\n--- Extraction Started ---")
+                
+                # 전체 텍스트에서 검색
+                for match in km_pattern.finditer(full_text):
+                    num_str = match.group(1)
+                    found_numbers.append(num_str)
+                    st.success(f"Found Distance: {num_str} km")
+                    print(f"[LOG] Found: {num_str} km")
+                
+                if not found_numbers:
+                    st.warning("No distance (km) found in the text.")
+                    print("[LOG] No distance found.")
+                    
+                print("--- Extraction Finished ---\n")
+            else:
+                st.warning("No text detected.")
+    else:
+        st.warning("Please configure GCP credentials in .streamlit/secrets.toml")
