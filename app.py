@@ -112,7 +112,9 @@ if uploaded_file is not None:
             if texts:
                 full_text = texts[0].description
 
-                number_pattern = re.compile(r'\d+(\.\d+)?')
+                # 패턴 수정: 숫자(1개 이상) + 점(.) + 숫자(1개 이상)
+                # 예: 10.00, 5.3, 100.12345 모두 가능
+                number_pattern = re.compile(r'\d+\.\d+')
                 found_numbers = []
 
                 for match in number_pattern.finditer(full_text):
@@ -152,7 +154,7 @@ if uploaded_file is not None:
                         else:
                             st.error("Please select a user first or check sheet connection.")
                 else:
-                    st.warning("No numbers found.")
+                    st.warning("No numbers found matching pattern '0.0'.")
             else:
                 st.warning("No text detected.")
     else:
